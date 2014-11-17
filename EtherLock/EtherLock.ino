@@ -1,34 +1,9 @@
 /*
- * MFRC522 - Library to use ARDUINO RFID MODULE KIT 13.56 MHZ WITH TAGS SPI W AND R BY COOQROBOT.
- * The library file MFRC522.h has a wealth of useful info. Please read it.
- * The functions are documented in MFRC522.cpp.
- *
- * Based on code Dr.Leong   ( WWW.B2CQSHOP.COM )
- * Created by Miguel Balboa (circuitito.com), Jan, 2012.
- * Rewritten by Søren Thing Andersen (access.thing.dk), fall of 2013 (Translation to English, refactored, comments, anti collision, cascade levels.)
- * Released into the public domain.
- *
- * Sample program showing how to read data from a PICC using a MFRC522 reader on the Arduino SPI interface.
- *----------------------------------------------------------------------------- empty_skull 
- * Aggiunti pin per arduino Mega
- * add pin configuration for arduino mega
- * http://mac86project.altervista.org/
- ----------------------------------------------------------------------------- Nicola Coppola
- * Pin layout should be as follows:
- * Signal     Pin              Pin               Pin
- *            Arduino Uno      Arduino Mega      MFRC522 board
- * ------------------------------------------------------------
- * Reset      9                5                 RST
- * SPI SS     10               53                SDA
- * SPI MOSI   11               51                MOSI
- * SPI MISO   12               50                MISO
- * SPI SCK    13               52                SCK
- *
- * The reader can be found on eBay for around 5 dollars. Search for "mf-rc522" on ebay.com. 
+     Unlock a door using a relay from a command sent via ethernet
  */
 
 #include <SPI.h>
-#include <MFRC522.h>
+#include <Ethernet.h>
 
 #define lockPin 8
 
@@ -41,64 +16,79 @@ int unlockms = 1000;
 // Counter for the unlock time
 long unlocktime = millis();
 
+// Enter a MAC address and IP address for your controller below.
+// The IP address will be dependent on your local network:
+byte mac[] = { 
+  0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+IPAddress ip(192,168,0,5);
+
+// Initialize the Ethernet server library
+// with the IP address and port you want to use 
+// (port 80 is default for HTTP):
+EthernetServer server(80);
+
+
 void setup() {
   Serial.begin(9600);	// Initialize serial communications with the PC
   
   // Setup the relay pin for the door lock
   pinMode(lockPin,OUTPUT);
   
-  // Unlock door for a few seconds
-  digitalWrite(lockPin,HIGH);
-  delay(100);
-  digitalWrite(lockPin,LOW);
-    
-  SPI.begin();	        // Init SPI bus
-  mfrc522.PCD_Init();	// Init MFRC522 card
-  //Serial.println("Scan PICC to see UID and type...");
-  
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for Leonardo only
+  }
+
+
+  // start the Ethernet connection and the server:
+  Ethernet.begin(mac, ip);
+  server.begin();
+  Serial.print("lock server is at ");
+  Serial.println(Ethernet.localIP());
   
 }
 
 void loop() {
-  // If the door has been unlocked for the specified time
-  if (millis() - unlocktime > unlockms) {
-    digitalWrite(lockPin,LOW);
-  }
-  
-  // Listen for a response from the perl script
-  if (Serial.available() > 0) {
-    lockState = Serial.read();
-    
-    Serial.println(lockState);
-    
-    if (lockState > 48) {
-      digitalWrite(lockPin,HIGH);
-      unlocktime = millis();
+  // listen for incoming clients
+  EthernetClient client = server.available();
+  if (client) {
+    Serial.println("new client");
+    // an http request ends with a blank line
+    boolean currentLineIsBlank = true;
+    while (client.connected()) {
+      if (client.available()) {
+        char c = client.read();
+        Serial.write(c);
+        // if you've gotten to the end of the line (received a newline
+        // character) and the line is blank, the http request has ended,
+        // so you can send a reply
+        if (c == '\n' && currentLineIsBlank) {
+          // send a standard http response header
+          client.println("HTTP/1.1 200 OK");
+          client.println("Content-Type: text/html");
+          client.println("Connection: close");  // the connection will be closed after completion of the response
+	  client.println("Refresh: 5");  // refresh the page automatically every 5 sec
+          client.println();
+          client.println("<!DOCTYPE HTML>");
+          client.println("<html>");
+          // Receive some data ? this is a work in progress
+          client.println("</html>");
+          break;
+        }
+        if (c == '\n') {
+          // you're starting a new line
+          currentLineIsBlank = true;
+        } 
+        else if (c != '\r') {
+          // you've gotten a character on the current line
+          currentLineIsBlank = false;
+        }
+      }
     }
+    // give the web browser time to receive the data
+    delay(1);
+    // close the connection:
+    client.stop();
+    Serial.println("client disonnected");
   }
-  
-  // If a new card placed on the reader
-  if ( ! mfrc522.PICC_IsNewCardPresent()) {
-    return;
-  }
-  
-  // Card placed, get serial and continue
-  if ( ! mfrc522.PICC_ReadCardSerial()) {
-    return;
-  }
-  
-  // Dump debug info about the card. PICC_HaltA() is automatically called.
-  //mfrc522.PICC_DumpToSerial(&(mfrc522.uid));
-  
-  //Serial.print("Card ID: ");
-  cardID = "";
-  for (byte i = 0; i < mfrc522.uid.size; i++) {
-    cardID+= mfrc522.uid.uidByte[i];
-  } 
-  Serial.println(cardID);
-  
-  // Stop reading this card
-  mfrc522.PICC_HaltA();
-  
 }
 
